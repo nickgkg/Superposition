@@ -12,7 +12,7 @@ public class Follow : MonoBehaviour
     }
 
     // Update is called once per frame
-    void Update()
+    void LateUpdate()
     {
         if (follow == null) {
             Player player = Component.FindObjectOfType<Player>();

@@ -1,12 +1,15 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 
 public class Spawner : MonoBehaviour
 {
     public GameObject[] spawns;
 
     public GameObject popup;
+    public Text timeDisplay;
+    public Text popupTimeDisplay;
     public bool spawning;
     public bool spawnTower;
     public bool checkWon;
@@ -19,7 +22,7 @@ public class Spawner : MonoBehaviour
 
     bool gridState = true;
     float gridStateChange = 0;
-
+    private float timer;
     void Start() {
         if (spawnRandomLayer) {
             float width = 15f;
@@ -40,7 +43,6 @@ public class Spawner : MonoBehaviour
                 n.name = spawns[rand].name;
             }
         }
-        reset();
     }
 
 
@@ -49,10 +51,10 @@ public class Spawner : MonoBehaviour
         for (int i = 0; i < spawns.Length; i++) {
             string key = "" + (i + 1);
             if (spawning && Random.Range(0, 1000) == 0) {
-                Debug.Log("spawning");
+                //Debug.Log("spawning");
                 if (!SuperPosition.superPositions.ContainsKey(key)
                         || SuperPosition.superPositions[key].Count == 0) {
-                    Debug.Log("spawning " + key);
+                    //Debug.Log("spawning " + key);
                     GameObject n = GameObject.Instantiate(spawns[i], gameObject.transform.position, gameObject.transform.rotation);
                     n.name = spawns[i].name;
                     break;
@@ -71,53 +73,74 @@ public class Spawner : MonoBehaviour
         }
         const int frameWait = 5;
         if (gridSize > 0) {
+            if (Input.GetKeyDown(KeyCode.R)) {
+                reset();
+                return;
+            }
+            if (grid == null) {
+                return;
+            }
             Vector2Int? movement = null;
-            if (Input.GetKey(KeyCode.S)) {
-                movement = new Vector2Int(0, -1);
-            }
-            if (Input.GetKey(KeyCode.D)) {
-                movement = new Vector2Int(-1, 0);
-            }
-            if (Input.GetKey(KeyCode.A)) {
-                movement = new Vector2Int(1, 0);
-            }
-            if (Input.GetKey(KeyCode.W)) {
-                movement = new Vector2Int(0, 1);
+            if (playerEnabled) {
+                if (Input.GetKey(KeyCode.S)) {
+                    movement = new Vector2Int(0, -1);
+                }
+                if (Input.GetKey(KeyCode.D)) {
+                    movement = new Vector2Int(-1, 0);
+                }
+                if (Input.GetKey(KeyCode.A)) {
+                    movement = new Vector2Int(1, 0);
+                }
+                if (Input.GetKey(KeyCode.W)) {
+                    movement = new Vector2Int(0, 1);
+                }
             }
             const int death = 30;
             for (int i = 0; i< gridSize; ++i) {
                 for (int j = 0; j< gridSize; ++j) {
-                    if (grid[i][j] == null || grid[i][j].gameObject == null) {
+                    if (grid[i][j] == null || grid[i][j].gameObject == null || grid[i][j].dying) {
                         grid[i][j] = null;
                         if (Time.frameCount % frameWait == 0) {
+                            string keyFound = "";
+                            int surroundingLiveness = 0;
+                            SuperPosition lastSup = null;
+
                             foreachSurrounding(i,j, (sup) => {
                                 if (sup == null) {
                                     return false;
                                 }
-                                if (sup.aliveness > death*1/3 && sup.aliveness < death*2/3) {
-                                    GameObject g = spawn(sup.gameObject, i, j);
-                                    Vector3 localScale = g.transform.localScale;
-                                    localScale.y = 1f;
-                                    g.transform.localScale = localScale;
-                                    return true;
+                                if (!sup.dying && sup.aliveness < death*2/3) {
+                                    if (lastSup == null || keyFound == sup.key) {
+                                        surroundingLiveness += sup.aliveness;
+                                        keyFound = sup.key;
+                                        lastSup = sup;
+                                    }
                                 }
                                 return false;
                             });
+                            if (lastSup != null && surroundingLiveness > death*1/3) {
+                                GameObject g = spawn(lastSup.gameObject, i, j);
+                                Vector3 localScale = g.transform.localScale;
+                                localScale.y = 0.0001f;
+                                g.transform.localScale = localScale;
+                            }
                         }
                     } else if (grid[i][j].key == "player"){
-                        if (movement != null && Time.frameCount % frameWait == 0) {
-                            Vector2Int v = movement.Value;
-                            int i2 = i + v.x;
-                            int j2 = j + v.y;     
-                            if (i2 < 0 || i2 >= gridSize || j2 < 0 || j2 >= gridSize) {
-                                continue;
-                            }
-                            if (grid[i2][j2] != null) {
-                                lost();
-                                return;
+                        if (Time.frameCount % frameWait == 0) {
+                            if (movement != null) {
+                                Vector2Int v = movement.Value;
+                                int i2 = i + v.x;
+                                int j2 = j + v.y;     
+                                if (i2 < 0 || i2 >= gridSize || j2 < 0 || j2 >= gridSize) {
+                                    continue;
+                                }
+                                if (grid[i2][j2] != null) {
+                                    lost();
+                                    return;
+                                }
                             }
                             bool justLost = foreachSurrounding(i,j, (sup) => {
-                                return sup != null;
+                                return sup != null && sup.aliveness > death/3;
                             });
                             if (justLost) {
                                 lost();
@@ -125,6 +148,7 @@ public class Spawner : MonoBehaviour
                             }
                             grid[i2][j2] = grid[i][j];
                             updatePos(i2, j2);
+                            playerPos = new Vector2Int(i2, j2);
                             grid[i][j] = null;
                             movement = null;
                         }
@@ -141,30 +165,46 @@ public class Spawner : MonoBehaviour
                                 if (sup == null) {
                                     return false;
                                 }
-                                if (sup.key != grid[i][j].key) {
+                                if (sup.key != grid[i][j].key && sup.gameObject != null && sup.aliveness > death*2/3) {
                                     foreach (var sup2 in new SuperPosition[]{sup, grid[i][j]})
                                     {
                                         List<SuperPosition> sups = SuperPosition.superPositions[sup2.key];
                                         var supSup = sups[Random.Range(0, sups.Count)];
                                         supSup.CollapseOthers();
+                                        supSup.aliveness = 0;
                                     }
                                 }
                                 return false;
                             });
                         }
                         float fractionToNext = Time.frameCount%frameWait/(float)frameWait;
-                        grid[i][j].gameObject.transform.localScale = new Vector3(1, 0.5f + Mathf.Sin((grid[i][j].aliveness + fractionToNext)/death * Mathf.PI), 1);
+                        grid[i][j].gameObject.transform.localScale = new Vector3(1, 0.001f + 2 * Mathf.Sin((grid[i][j].aliveness + fractionToNext)/death * Mathf.PI), 1);
                     }
                 }
             }
             //gridState = !gridState;
         }
 
+        float oldTimer = timer;
+        timer += Time.deltaTime;
+        // Spawn rate in seconds
+        if ((int)(oldTimer/spawnRate) != (int)(timer/spawnRate)) {
+            spawnRandom();
+        }
+        timeDisplay.text = myFormat(timer);
     }
+    public float spawnRate = 10;
+
+    private string myFormat(float f) {
+        return "" + (int)f + "." + (int)(f*10%10) + (int)(f*100%10);
+    }
+
+    Vector2Int playerPos = new Vector2Int(50, 50);
 
     private GameObject spawn(GameObject g, int i, int j) {
         GameObject n = GameObject.Instantiate(g);
         n.name = g.name;
+        n.transform.localScale = new Vector3(1, 0.0001f, 1f);
         grid[i][j] = n.GetComponent<SuperPosition>();
         grid[i][j].aliveness = 0;
         updatePos(i, j);
@@ -179,15 +219,33 @@ public class Spawner : MonoBehaviour
     }
 
     private void lost(){
-        //popup.SetActive(true);
+        popup.SetActive(true);
+        popupTimeDisplay.text = "Score: " + myFormat(timer) + " Seconds";
+        timer = 0f;
+        playerEnabled = false;
     }
 
-    private void reset() {
+    bool playerEnabled = false;
+
+    private void spawnRandom() {
+        int i = Random.Range(0, gridSize);
+        int j = Random.Range(0, gridSize);
+        if (Mathf.Abs(i - playerPos.x) + Mathf.Abs(j - playerPos.y) > 5) {
+            if (grid[i][j] == null) {
+                spawn(spawns[Random.Range(0, spawns.Length)], i, j);
+                grid[i][j].key = "" + Random.Range(100, 100000);
+            }
+        }
+    }
+
+    public void reset() {
+        popup.SetActive(false);
+        playerEnabled = true;
         if (gridSize > 0) {
             if (grid != null) {
                 for(int i = 0; i< gridSize; ++i) {
                     for(int j = 0; j< gridSize; ++j) {
-                        if (grid[i][j] != null) {
+                        if (grid[i][j] != null && grid[i][j] != player) {
                             GameObject.Destroy(grid[i][j].gameObject);
                         }
                     }

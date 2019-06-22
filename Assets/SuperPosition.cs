@@ -18,13 +18,19 @@ public class SuperPosition : MonoBehaviour
             this.transform.localScale = startScale * ((float)i / length);
             yield return null;
         }
+        if (gameObject == null) {
+            //Debug.Log("failed to find gameobject");
+        }
         GameObject.Destroy(gameObject);
+        GameObject.Destroy(this);
     }
 
     void CollapseSelf() {
         dying = true;
         if (this != null && this.gameObject != null) {
             this.StartCoroutine(this.AnimateCollapse());
+        } else {
+            //Debug.Log("Trying to collapse missing gameobject");
         }
     }
 
